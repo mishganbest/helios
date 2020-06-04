@@ -82,7 +82,7 @@ namespace Helios.Reactor.Tcp
 
                 var receiveState = CreateNetworkState(newSocket, node);
                 var responseChannel = new TcpReactorResponseChannel(this, newSocket, EventLoop.Clone(ProxiesShareFiber));
-                SocketMap.Add(node, responseChannel);
+                SocketMap.TryAdd(node, responseChannel);
                 NodeConnected(node, responseChannel);
                 newSocket.BeginReceive(receiveState.RawBuffer, 0, receiveState.RawBuffer.Length, SocketFlags.None,
                     ReceiveCallback, receiveState);
@@ -104,24 +104,28 @@ namespace Helios.Reactor.Tcp
                 if (!receiveState.Socket.Connected || received == 0)
                 {
                     HeliosTrace.Instance.TcpInboundReceiveFailure();
-                    var connection = SocketMap[receiveState.RemoteHost];
-                    CloseConnection(connection);
+                    if (SocketMap.TryGetValue(receiveState.RemoteHost, out var connection))
+                    {
+                        CloseConnection(connection);
+                    }
+
                     return;
                 }
 
 
                 receiveState.Buffer.WriteBytes(receiveState.RawBuffer, 0, received);
                 HeliosTrace.Instance.TcpInboundReceive(received);
-                var adapter = SocketMap[receiveState.RemoteHost];
-
-                List<IByteBuf> decoded;
-                adapter.Decoder.Decode(ConnectionAdapter, receiveState.Buffer, out decoded);
-
-                foreach (var message in decoded)
+                if (SocketMap.TryGetValue(receiveState.RemoteHost, out var adapter))
                 {
-                    var networkData = NetworkData.Create(receiveState.RemoteHost, message);
-                    ReceivedData(networkData, adapter);
-                    HeliosTrace.Instance.TcpInboundReceiveSuccess();
+                    List<IByteBuf> decoded;
+                    adapter.Decoder.Decode(ConnectionAdapter, receiveState.Buffer, out decoded);
+
+                    foreach (var message in decoded)
+                    {
+                        var networkData = NetworkData.Create(receiveState.RemoteHost, message);
+                        ReceivedData(networkData, adapter);
+                        HeliosTrace.Instance.TcpInboundReceiveSuccess();
+                    }
                 }
 
                 //reuse the buffer
@@ -140,27 +144,24 @@ namespace Helios.Reactor.Tcp
             }
             catch (SocketException ex) //node disconnected
             {
-                if (SocketMap.ContainsKey(receiveState.RemoteHost))
+                if (SocketMap.TryGetValue(receiveState.RemoteHost, out var connection))
                 {
-                    var connection = SocketMap[receiveState.RemoteHost];
                     CloseConnection(ex, connection);
                 }
                 HeliosTrace.Instance.TcpInboundReceiveFailure();
             }
             catch (ObjectDisposedException ex)
             {
-                if (SocketMap.ContainsKey(receiveState.RemoteHost))
+                if (SocketMap.TryGetValue(receiveState.RemoteHost, out var connection))
                 {
-                    var connection = SocketMap[receiveState.RemoteHost];
                     CloseConnection(ex, connection);
                 }
                 HeliosTrace.Instance.TcpInboundReceiveFailure();
             }
             catch (Exception ex)
             {
-                if (SocketMap.ContainsKey(receiveState.RemoteHost))
+                if (SocketMap.TryGetValue(receiveState.RemoteHost, out var connection))
                 {
-                    var connection = SocketMap[receiveState.RemoteHost];
                     OnErrorIfNotNull(ex, connection);
                 }
                 HeliosTrace.Instance.TcpInboundReceiveFailure();
@@ -173,7 +174,10 @@ namespace Helios.Reactor.Tcp
 
         public override void Send(byte[] buffer, int index, int length, INode destination)
         {
-            var clientSocket = SocketMap[destination];
+            if (!SocketMap.TryGetValue(destination, out var clientSocket))
+            {
+                return;
+            }
             try
             {
                 if (clientSocket.WasDisposed || !clientSocket.Socket.Connected)
@@ -213,9 +217,10 @@ namespace Helios.Reactor.Tcp
 
         internal override void CloseConnection(Exception ex, IConnection remoteHost)
         {
-            if (!SocketMap.ContainsKey(remoteHost.RemoteHost)) return; //already been removed
-
-            var clientSocket = SocketMap[remoteHost.RemoteHost];
+            if (!SocketMap.TryGetValue(remoteHost.RemoteHost, out var clientSocket))
+            {
+                return;
+            }
 
             try
             {
@@ -232,8 +237,7 @@ namespace Helios.Reactor.Tcp
             {
                 NodeDisconnected(new HeliosConnectionException(ExceptionType.Closed, ex), remoteHost);
 
-                if (SocketMap.ContainsKey(remoteHost.RemoteHost))
-                    SocketMap.Remove(remoteHost.RemoteHost);
+                SocketMap.TryRemove(remoteHost.RemoteHost, out var temp);
 
                 if (!clientSocket.WasDisposed)
                     clientSocket.Dispose();

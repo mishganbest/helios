@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license. See LICENSE file in the project root for full license information.
 // See ThirdPartyNotices.txt for references to third party code used inside Helios.
 
-using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using Helios.Buffers;
@@ -19,7 +19,7 @@ namespace Helios.Reactor
     /// </summary>
     public abstract class ProxyReactorBase : ReactorBase
     {
-        protected Dictionary<INode, ReactorResponseChannel> SocketMap = new Dictionary<INode, ReactorResponseChannel>();
+        protected ConcurrentDictionary<INode, ReactorResponseChannel> SocketMap = new ConcurrentDictionary<INode, ReactorResponseChannel>();
 
         protected ProxyReactorBase(IPAddress localAddress, int localPort, NetworkEventLoop eventLoop,
             IMessageEncoder encoder, IMessageDecoder decoder, IByteBufAllocator allocator,
